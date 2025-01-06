@@ -5,7 +5,6 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -24,6 +23,8 @@ import androidx.compose.material.TextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -34,20 +35,24 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.vsple.salestax_android.models.ItemDetailsModel
 import com.vsple.salestax_android.models.Receipt
 import com.vsple.salestax_android.ui.theme.SalesTax_AndroidTheme
-import com.vsple.salestax_android.viewmodel.logic.ShoppingCart
+import com.vsple.salestax_android.viewmodel.MainVM
+import dagger.hilt.android.AndroidEntryPoint
 
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
+            val viewModel: MainVM = hiltViewModel()
             SalesTax_AndroidTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     ShoppingCartApp(
-                        modifier = Modifier.padding(innerPadding),
+                        modifier = Modifier.padding(innerPadding),viewModel,
                       )
                 }
             }
@@ -55,12 +60,13 @@ class MainActivity : ComponentActivity() {
     }
 }
 @Composable
-fun ShoppingCartApp(modifier : Modifier) {
+fun ShoppingCartApp(modifier : Modifier,viewModel: MainVM) {
     var screenKey = remember { mutableStateOf(0) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         ShoppingCartScreen(
             modifier = Modifier,
+           viewModel = viewModel,
             onClearAll = {
                 screenKey.value++ // Change the key to trigger recomposition
             },
@@ -73,9 +79,16 @@ fun ShoppingCartApp(modifier : Modifier) {
 
 @Composable
 fun ShoppingCartScreen(modifier: Modifier,
+                       viewModel: MainVM,
                        onClearAll: () -> Unit,
                        key: Int ) {
-    val cart = remember { ShoppingCart() }
+
+    val receiptFinal = viewModel.receipt.collectAsState<Receipt?, Receipt?>(initial = null)
+    val items = remember { mutableStateListOf<ItemDetailsModel>() }
+
+
+
+ //   val cart = remember { ShoppingCart() }
     var name = remember { mutableStateOf("") }
     var price = remember { mutableStateOf("") }
     var quantity = remember { mutableStateOf("") }
@@ -86,7 +99,8 @@ fun ShoppingCartScreen(modifier: Modifier,
 
     val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
-
+    val maxCharName = 18
+    val maxCharPrice = 7
     fun updateExemptedState(name: String) {
         val exemptCategories = listOf("book", "chocolates","chocolate","chocolate bar","pills", "medicine", "food","imported chocolates", "headache pills")
         val isInExemptCategory = exemptCategories.any { name.contains(it, ignoreCase = true) }
@@ -104,8 +118,10 @@ fun ShoppingCartScreen(modifier: Modifier,
         TextField(
             value = name.value,
             onValueChange = {
-                name.value = it
-                updateExemptedState(it)
+                if (it.length <= maxCharName) name.value = it
+
+                    updateExemptedState(it)
+
             },
             label = { Text("Item Name") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
@@ -114,14 +130,18 @@ fun ShoppingCartScreen(modifier: Modifier,
         )
         TextField(
             value = price.value,
-            onValueChange = { price.value = it },
+            onValueChange = {
+                if (it.length <= maxCharPrice) price.value = it
+                            },
             label = { Text("Price") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth()
         )
         TextField(
             value = quantity.value,
-            onValueChange = { quantity.value = it },
+            onValueChange = {
+                if (it.length <= maxCharPrice) quantity.value = it
+                            },
             label = { Text("Quantity") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth()
@@ -142,7 +162,7 @@ fun ShoppingCartScreen(modifier: Modifier,
             Button(
                 onClick = {
                     if (name.value.isNotBlank() && price.value.isNotBlank() && quantity.value.isNotBlank()) {
-                        cart.addItem(
+                        viewModel.addItem(
                             ItemDetailsModel(
                                 name = name.value,
                                 price = price.value.toDoubleOrNull() ?: 0.0,
@@ -190,9 +210,7 @@ fun ShoppingCartScreen(modifier: Modifier,
             }
             Button(
                 onClick = {
-                    cart.cleaItemList()
-                    cart.cleaItemList()
-
+                    viewModel.clearCart()
                     // Clear all state variables
                     name.value = ""
                     price.value = ""
@@ -222,10 +240,9 @@ fun ShoppingCartScreen(modifier: Modifier,
         Button(
             onClick = {
                 keyboardController?.hide()
-                if (cart.getItem().size!=0 && cart.getItem().size!=null) {
-                    receipt.value = cart.calculateReceipt()
-
-                }else{
+                if (viewModel.getItems().isNotEmpty()) {
+                    viewModel.generateReceipt()
+                } else {
                     Toast.makeText(context, "Please add items to the cart", Toast.LENGTH_SHORT).show()
                 }
                       },
@@ -238,24 +255,63 @@ fun ShoppingCartScreen(modifier: Modifier,
 
         Spacer(modifier = Modifier.height(16.dp))
 
+       /* // Display Receipt
+        receipt.value?.let {
+            Text("Receipt:", style = MaterialTheme.typography.h6)
+            Divider()
+
+            Text("${ it.printReceipt()}")
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text("Sales Taxes: ${"%.2f".format(it.getTotalSalesTax() ?: 0.0)}")
+           Text("Total: ${"%.2f".format(it.getTotalPrice())}")
+
+        }*/
         // Display Receipt
         receipt?.let {
             Text("Receipt:", style = MaterialTheme.typography.h6)
             Divider()
-
-            if (it.value != null) {
-
-                for (item in it.value!!.items) {
-                    Text("${item.quantity} ${item.name}: ${"%.2f".format(item.priceWithTax)}")
-                }
-            }
-
+            val it = receiptFinal.value
+            Text(it?.printReceipt()?: "")
             Spacer(modifier = Modifier.height(8.dp))
-
-            Text("Sales Taxes: ${"%.2f".format(it.value?.totalSalesTax ?: 0.0)}")
-            Text("Total: ${"%.2f".format(it.value?.totalPrice ?: 0.0)}")
+            Text("Sales Taxes: ${"%.2f".format(it?.getTotalSalesTax() ?: 0.0)}")
+            Text("Total: ${"%.2f".format(it?.getTotalPrice()?: 0.0)}")
         }
 
     }
 
 }
+/*fun main() {
+    val shoppingCart = ShoppingCart()
+
+    println("Enter the items in your shopping basket (type 'done' to finish):")
+    while (true) {
+        print("Enter item (format: quantity name price imported(true/false) exempt(true/false)): ")
+        val input = readLine()
+
+        if (input == "done") break
+
+        val parts = input?.split(" ") ?: continue
+        if (parts.size != 5) {
+            println("Invalid input format! Please try again.")
+            continue
+        }
+
+        try {
+            val quantity = parts[0].toInt()
+            val name = parts[1]
+            val price = parts[2].toDouble()
+            val isImported = parts[3].toBoolean()
+            val isExempt = parts[4].toBoolean()
+
+            val item = ItemDetailsModel(name, price, quantity, isImported, isExempt)
+            shoppingCart.addItem(item)
+        } catch (e: Exception) {
+            println("Error parsing input. Please try again.")
+        }
+    }
+
+    println("\nYour Receipt:")
+    val receipt = shoppingCart.getGenerateReceipt()
+    println(receipt.printReceipt())
+}*/
